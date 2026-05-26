@@ -1,0 +1,84 @@
+/* Tapwire Design Tokens — DESIGN_SPEC.md 기준 */
+
+:root {
+  /* Fonts */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Surfaces */
+  --bg-app:      #0B0C0E;
+  --bg-window:   #111317;
+  --bg-panel:    #16181D;
+  --bg-card:     #1B1E24;
+  --bg-elev:     #22262E;
+  --bg-hover:    #1F232A;
+  --bg-selected: #252A33;
+
+  /* Lines */
+  --line:        rgba(255,255,255,0.06);
+  --line-strong: rgba(255,255,255,0.10);
+
+  /* Text */
+  --text-1:      #ECEEF1;
+  --text-2:      #B4B8C0;
+  --text-3:      #777E89;
+  --text-dim:    #50565F;
+
+  /* Accent */
+  --accent:      #5B8DEF;
+  --accent-soft: rgba(91,141,239,0.14);
+  --accent-line: rgba(91,141,239,0.35);
+
+  /* HTTP Method Colors */
+  --m-get:     #5B8DEF;
+  --m-post:    #2DD4A7;
+  --m-put:     #E0A24A;
+  --m-delete:  #EF6E6E;
+  --m-patch:   #B084EE;
+  --m-default: #777E89;
+
+  /* HTTP Status Colors */
+  --s-2xx: #2DD4A7;
+  --s-3xx: #5B8DEF;
+  --s-4xx: #E0A24A;
+  --s-5xx: #EF6E6E;
+
+  /* Border Radius */
+  --r-sm:   6px;
+  --r-md:   10px;
+  --r-lg:   14px;
+  --r-xl:   20px;
+  --r-pill: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.35);
+  --shadow-lg: 0 20px 60px rgba(0,0,0,0.55);
+  --shadow-window:
+    0 0 0 1px rgba(255,255,255,0.06),
+    0 30px 80px rgba(0,0,0,0.6),
+    0 10px 30px rgba(0,0,0,0.35);
+}
+
+[data-theme="light"] {
+  --bg-app:      #F4F5F7;
+  --bg-window:   #FFFFFF;
+  --bg-panel:    #FAFBFC;
+  --bg-card:     #FFFFFF;
+  --bg-elev:     #F2F4F7;
+  --bg-hover:    #F4F5F7;
+  --bg-selected: #EDF1F8;
+  --line:        rgba(0,0,0,0.06);
+  --line-strong: rgba(0,0,0,0.10);
+  --text-1:      #14161A;
+  --text-2:      #4A4F58;
+  --text-3:      #6F757F;
+  --text-dim:    #A8ADB5;
+  --accent:      #3B72E2;
+  --accent-soft: rgba(59,114,226,0.10);
+  --accent-line: rgba(59,114,226,0.30);
+  --shadow-window:
+    0 0 0 1px rgba(0,0,0,0.08),
+    0 30px 80px rgba(0,0,0,0.12),
+    0 10px 30px rgba(0,0,0,0.08);
+}

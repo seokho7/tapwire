@@ -1,0 +1,12 @@
+DESIGN_SPEC.md
+PROJECT_PLAN.md
+node_modules
+build
+certs/
+data/
+*.pem
+*.key
+*.db
+*.db-shm
+*.db-wal
+.env
