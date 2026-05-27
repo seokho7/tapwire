@@ -236,3 +236,28 @@ export const IconEdit = ({ size, className, style }: IconProps) => (
     <line x1="8.5" y1="4.5" x2="11.5" y2="7.5" />
   </svg>
 );
+
+export const IconWrench = ({ size, className, style }: IconProps) => (
+  <svg {...props(size)} className={className} style={style}>
+    <path d="M11,2 A4,4,0,0,1,14,6 A4,4,0,0,1,10,10 L4,14 A1.5,1.5,0,0,1,2,12 L6,6 A4,4,0,0,1,11,2 Z" />
+    <line x1="6" y1="6" x2="10" y2="10" />
+  </svg>
+);
+
+export const IconBroom = ({ size, className, style }: IconProps) => (
+  <svg {...props(size)} className={className} style={style}>
+    <path d="M3,13 L8,8" />
+    <path d="M8,8 L13,3 A2,2,0,0,1,15,5 L10,10" />
+    <path d="M3,13 L2,14 A1,1,0,0,0,3,15 L5,14 L6,12 L4,11 Z" />
+    <line x1="10" y1="10" x2="8" y2="8" />
+  </svg>
+);
+
+export const IconChrome = ({ size, className, style }: IconProps) => (
+  <svg {...props(size)} className={className} style={style}>
+    <circle cx="8" cy="8" r="3" />
+    <line x1="8" y1="1" x2="15" y2="1" />
+    <line x1="1" y1="13" x2="4.5" y2="7" />
+    <line x1="11.5" y1="7" x2="15" y2="13" />
+  </svg>
+);

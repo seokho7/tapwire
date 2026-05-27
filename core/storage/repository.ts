@@ -217,6 +217,22 @@ export class PacketRepository {
     this.stmtDeleteByHost.run(host);
   }
 
+  deleteStatic(category: "css" | "js" | "image" | "font" | "all" = "all"): number {
+    const PATTERNS: Record<string, string[]> = {
+      css: ["text/css"],
+      js: ["application/javascript", "text/javascript"],
+      image: ["image/"],
+      font: ["font/", "application/font", "application/x-font"],
+      all: ["text/css", "application/javascript", "text/javascript", "image/", "font/", "application/font", "application/x-font"],
+    };
+    const patterns = PATTERNS[category];
+    const conditions = patterns.map(() => "content_type LIKE ?").join(" OR ");
+    const result = this.db.prepare(`DELETE FROM packets WHERE ${conditions}`).run(
+      ...patterns.map((p) => `%${p}%`)
+    );
+    return result.changes;
+  }
+
   getTopHosts(limit = 10): Array<{ host: string; count: number }> {
     return this.stmtTopHosts.all(limit) as Array<{ host: string; count: number }>;
   }

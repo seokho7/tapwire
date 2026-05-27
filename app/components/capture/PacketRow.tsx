@@ -44,6 +44,8 @@ export const PacketRow = memo(function PacketRow({ packet }: Props) {
       className={`packet-row${isSelected ? " selected" : ""}${isMultiSelected ? " multi-selected" : ""}${packet.intercepted ? " intercepted-row" : ""}`}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
+      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+      style={{ userSelect: "none" }}
     >
       {rowColor && <span className="packet-color-bar" style={{ background: rowColor }} />}
       <MethodBadge method={packet.method} />

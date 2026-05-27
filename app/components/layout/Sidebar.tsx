@@ -5,7 +5,7 @@ import {
   IconActivity, IconGlobe,
   IconPhone, IconCert, IconSettings,
   IconPlay, IconPause, IconX,
-  IconRules,
+  IconRules, IconWrench, IconBroom,
 } from "~/components/icons/index";
 
 export function Sidebar() {
@@ -123,6 +123,44 @@ export function Sidebar() {
         <NavItem to="/rules" icon={<IconRules size={14} />} label="Breakpoints" nav="rules" />
         <NavItem to="/setup" icon={<IconPhone size={14} />} label="Mobile Setup" nav="mobile" />
         <NavItem to="/cert" icon={<IconCert size={14} />} label="CA Certificate" nav="cert" />
+      </div>
+
+      {/* Utilities */}
+      <div style={{ height: 1, background: "var(--line)", margin: "4px 4px 8px" }} />
+      <div className="nav-section">
+        <div className="nav-title">Utilities</div>
+        <NavItem to="/utils" icon={<IconWrench size={14} />} label="Text Utils" nav="utils" />
+        <div style={{ height: 1, background: "var(--line)", margin: "6px 4px" }} />
+        <div style={{ padding: "4px 10px 6px" }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-dim)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+            <IconBroom size={11} /> Delete Static
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {([
+              { key: "all",   label: "All",   patterns: ["text/css", "application/javascript", "text/javascript", "image/", "font/", "application/font", "application/x-font"] },
+              { key: "css",   label: "CSS",   patterns: ["text/css"] },
+              { key: "js",    label: "JS",    patterns: ["application/javascript", "text/javascript"] },
+              { key: "image", label: "Image", patterns: ["image/"] },
+              { key: "font",  label: "Font",  patterns: ["font/", "application/font", "application/x-font"] },
+            ] as const).map(({ key, label, patterns }) => (
+              <button
+                key={key}
+                className="btn sm danger"
+                title={`Delete all ${label} packets`}
+                onClick={async () => {
+                  await fetch(`/api/packets?static=${key}`, { method: "DELETE" });
+                  const store = useStore.getState();
+                  const toRemove = store.packets
+                    .filter((p) => p.contentType && patterns.some((t) => p.contentType!.includes(t)))
+                    .map((p) => p.id);
+                  store.removePackets(toRemove);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Bottom */}

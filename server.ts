@@ -1,9 +1,15 @@
 import "dotenv/config";
 import path from "node:path";
+import fs from "node:fs";
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { gzip as gzipCb, gunzip as gunzipCb } from "node:zlib";
+import iconv from "iconv-lite";
+import {
+  gzip as gzipCb, gunzip as gunzipCb,
+  brotliCompress as brotliCompressCb, brotliDecompress as brotliDecompressCb,
+  constants as zlibConstants,
+} from "node:zlib";
 import compression from "compression";
 import express from "express";
 import { fileURLToPath } from "node:url";
@@ -23,6 +29,28 @@ import type { InterceptContext, RawRequest, RawResponse } from "./core/proxy/typ
 
 const gzip = promisify(gzipCb);
 const gunzip = promisify(gunzipCb);
+const brotliCompress = promisify(brotliCompressCb);
+const brotliDecompress = promisify(brotliDecompressCb);
+
+// "TW\x02" magic prefix = tapwire brotli format
+const TW_MAGIC = Buffer.from([0x54, 0x57, 0x02]);
+
+async function compressSession(json: Buffer): Promise<Buffer> {
+  const compressed = await brotliCompress(json, {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
+  });
+  return Buffer.concat([TW_MAGIC, compressed]);
+}
+
+async function decompressSession(buf: Buffer): Promise<Buffer> {
+  if (buf[0] === 0x54 && buf[1] === 0x57 && buf[2] === 0x02) {
+    return brotliDecompress(buf.slice(3));
+  }
+  if (buf[0] === 0x1f && buf[1] === 0x8b) {
+    return gunzip(buf);
+  }
+  return buf; // raw JSON fallback
+}
 
 interface BreakpointRule {
   id: string;
@@ -182,7 +210,13 @@ async function main() {
   api.delete("/packets", (req, res) => {
     if (!repo) return void res.status(503).json({ error: "Not initialized" });
     const host = req.query.host as string | undefined;
+    const staticParam = req.query.static as string | undefined;
     if (host) repo.deleteByHost(host);
+    else if (staticParam) {
+      const cat = (["css", "js", "image", "font"].includes(staticParam) ? staticParam : "all") as "css" | "js" | "image" | "font" | "all";
+      const n = repo.deleteStatic(cat);
+      return void res.json({ ok: true, deleted: n });
+    }
     else repo.deleteAll();
     res.json({ ok: true });
   });
@@ -223,8 +257,9 @@ async function main() {
     const limit = parseInt((req.query.limit as string) ?? "100000");
     const packets = repo.findAll({ limit, offset: 0 });
     const session = toSession(packets);
-    const json = Buffer.from(JSON.stringify(session));
-    const compressed = await gzip(json);
+    // Strip nulls before compressing — reduces JSON size significantly
+    const json = Buffer.from(JSON.stringify(session, (_, v) => (v === null ? undefined : v)));
+    const compressed = await compressSession(json);
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename="tapwire-${Date.now()}.wspy"`);
     res.send(compressed);
@@ -235,10 +270,10 @@ async function main() {
     let data: unknown = req.body;
     if (Buffer.isBuffer(data)) {
       try {
-        const buf = (data[0] === 0x1f && data[1] === 0x8b) ? await gunzip(data) : data;
-        data = JSON.parse(buf.toString());
+        const buf = await decompressSession(data);
+        data = JSON.parse(buf.toString("utf8"));
       } catch {
-        return void res.status(400).json({ error: "Invalid .wspy file" });
+        return void res.status(400).json({ error: "Invalid or corrupted .wspy file" });
       }
     }
     let packets;
@@ -411,11 +446,63 @@ async function main() {
   });
 
   // Launch browser with proxy
-  api.post("/launch-browser", (_req: express.Request, res: express.Response) => {
-    exec(`open -a Whale --args --proxy-server=localhost:${PROXY_PORT}`, (err) => {
+  api.post("/launch-browser", (req: express.Request, res: express.Response) => {
+    const browser = (req.body as { browser?: string })?.browser ?? "whale";
+
+    if (browser === "firefox") {
+      const profileDir = "/tmp/tapwire-ff-profile";
+      const userJs = [
+        `user_pref("network.proxy.type", 1);`,
+        `user_pref("network.proxy.http", "localhost");`,
+        `user_pref("network.proxy.http_port", ${PROXY_PORT});`,
+        `user_pref("network.proxy.ssl", "localhost");`,
+        `user_pref("network.proxy.ssl_port", ${PROXY_PORT});`,
+        `user_pref("network.proxy.no_proxies_on", "");`,
+      ].join("\n");
+      try {
+        fs.mkdirSync(profileDir, { recursive: true });
+        fs.writeFileSync(path.join(profileDir, "user.js"), userJs, "utf8");
+      } catch (e) {
+        return void res.status(500).json({ error: `Failed to create Firefox profile: ${(e as Error).message}` });
+      }
+      exec(`open -a Firefox --args --profile "${profileDir}" --no-remote`, (err) => {
+        if (err) return void res.status(500).json({ error: `Firefox not found: ${err.message}` });
+        res.json({ ok: true });
+      });
+      return;
+    }
+
+    const cmds: Record<string, string> = {
+      chrome: `open -a "Google Chrome" --args --proxy-server=localhost:${PROXY_PORT}`,
+      whale: `open -a Whale --args --proxy-server=localhost:${PROXY_PORT}`,
+    };
+    const cmd = cmds[browser] ?? cmds.whale;
+    exec(cmd, (err) => {
       if (err) return void res.status(500).json({ error: err.message });
       res.json({ ok: true });
     });
+  });
+
+  // EUC-KR conversion utility
+  api.post("/utils/euckr", (req: express.Request, res: express.Response) => {
+    const { text, direction } = req.body as { text: string; direction: "to" | "from" };
+    if (!text || !direction) return void res.status(400).json({ error: "text and direction required" });
+    try {
+      if (direction === "to") {
+        const buf = iconv.encode(text, "euc-kr");
+        const urlEncoded = Array.from(buf).map((b) => `%${b.toString(16).toUpperCase().padStart(2, "0")}`).join("");
+        res.json({ result: urlEncoded });
+      } else {
+        const cleaned = text.trim().replace(/\s+/g, "");
+        const bytes: number[] = [];
+        const parts = cleaned.split("%").filter(Boolean);
+        for (const p of parts) bytes.push(parseInt(p.slice(0, 2), 16));
+        const result = iconv.decode(Buffer.from(bytes), "euc-kr");
+        res.json({ result });
+      }
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // CA certificate

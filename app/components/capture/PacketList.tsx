@@ -154,11 +154,14 @@ export function PacketList({ style }: Props) {
       try {
         const buffer = await file.arrayBuffer();
         const bytes = new Uint8Array(buffer);
-        const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+        // Detect binary formats: gzip (1f 8b) or TW brotli (54 57 02)
+        const isBinary =
+          (bytes[0] === 0x1f && bytes[1] === 0x8b) ||
+          (bytes[0] === 0x54 && bytes[1] === 0x57 && bytes[2] === 0x02);
         const res = await fetch("/api/session", {
           method: "POST",
-          headers: { "Content-Type": isGzip ? "application/octet-stream" : "application/json" },
-          body: isGzip ? buffer : new TextDecoder().decode(bytes),
+          headers: { "Content-Type": isBinary ? "application/octet-stream" : "application/json" },
+          body: isBinary ? buffer : new TextDecoder().decode(bytes),
         });
         if (!res.ok) throw new Error(await res.text());
       } catch (err) {
