@@ -23,6 +23,8 @@
 **아키텍처 결정 메모:**
 처음에는 React Router v7 SSR 프레임워크 모드(`@react-router/express`)로 시작했으나, 실제로 SSR이 필요한 곳이 `node:os`를 호출하는 loader 2개뿐이었습니다. 나머지 95%는 순수 클라이언트 SPA였기 때문에, 이후 **Express + Vite SPA** 구조로 전환했습니다. API 로직은 `server.ts` Express 라우터에 인라인으로 통합되었으며, 빌드 시간은 551ms, 번들 크기는 249KB(gzip 77KB)입니다.
 
+현재 클라이언트 라우팅은 `react-router`를 **라이브러리 모드**(`<BrowserRouter>`)로만 사용합니다. SSR, 파일 기반 라우팅, `@react-router/express` 등 프레임워크 기능은 일절 사용하지 않습니다.
+
 ---
 
 ## 주요 기능
@@ -345,7 +347,8 @@ npm run start
 |--------|-----------|
 | 런타임 | Node.js 22+, TypeScript 5 |
 | 웹 프레임워크 | Express 4 (API 서버) |
-| SPA 번들러 | Vite 5 + React Router v7 (라이브러리 모드, 클라이언트 전용) |
+| 빌드 도구 | Vite 5 |
+| 클라이언트 라우터 | react-router v7 — 라이브러리 모드 (`<BrowserRouter>`) |
 | 프론트엔드 | React 18, Zustand 4 |
 | 빌드 결과 | 249KB JS (gzip 77KB), 빌드 시간 551ms |
 | 데이터베이스 | better-sqlite3 (SQLite WAL 모드) |
