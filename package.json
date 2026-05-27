@@ -4,8 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "npx tsx watch --ignore 'certs/**' --ignore 'data/**' --ignore 'build/**' --ignore '*.mjs' server.ts",
-    "build": "vite build",
-    "start": "NODE_ENV=production npx tsx server.ts",
+    "start": "vite build && NODE_ENV=production npx tsx server.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
@@ -20,6 +19,9 @@
     "uuid": "^10.0.0",
     "ws": "^8.18.0",
     "zustand": "^4.5.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
