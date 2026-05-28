@@ -60,7 +60,7 @@ function HexConverter() {
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [mode, setMode] = useState<"euckr" | "utf8">("euckr");
+  const [mode, setMode] = useState<"euckr" | "utf8" | "base64">("euckr");
 
   const convert = async () => {
     if (!input.trim()) return;
@@ -71,6 +71,17 @@ function HexConverter() {
       try {
         const bytes = parseHexBytes(input);
         const result = new TextDecoder("utf-8").decode(bytes);
+        setOutput(result);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+      return;
+    }
+
+    if (mode === "base64") {
+      try {
+        const bytes = parseHexBytes(input);
+        const result = btoa(String.fromCharCode(...bytes));
         setOutput(result);
       } catch (e) {
         setError((e as Error).message);
@@ -113,6 +124,13 @@ function HexConverter() {
         >
           UTF-8
         </button>
+        <button
+          className="btn sm"
+          style={mode === "base64" ? { background: "var(--accent-soft)", borderColor: "var(--accent-line)", color: "var(--accent)" } : {}}
+          onClick={() => setMode("base64")}
+        >
+          Base64
+        </button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 10, alignItems: "center" }}>
         <TextArea
@@ -123,7 +141,7 @@ function HexConverter() {
         <button className="btn" onClick={convert} disabled={loading}>
           {loading ? "..." : "Decode →"}
         </button>
-        <TextArea value={output} readOnly placeholder={mode === "euckr" ? "Korean text (EUC-KR decoded)" : "Text (UTF-8 decoded)"} />
+        <TextArea value={output} readOnly placeholder={mode === "euckr" ? "Korean text (EUC-KR decoded)" : mode === "utf8" ? "Text (UTF-8 decoded)" : "Base64 encoded string"} />
       </div>
       {error && <div style={{ color: "var(--m-delete)", fontSize: 12, marginTop: 6 }}>{error}</div>}
     </Section>
