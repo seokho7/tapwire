@@ -33,12 +33,16 @@ function BodySection({
 
   const isImage = contentType?.startsWith("image/");
 
-  // If bodyType=binary, the body is base64-encoded. Try to decode to text.
+  // If bodyType=binary, the body is base64-encoded. Decode to text.
   let displayBody = body;
   let decodedFromBase64 = false;
   if (bodyType === "binary" && !isImage) {
     try {
-      displayBody = atob(body);
+      const bin = atob(body);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const isEuckr = contentType != null && /charset=["']?(euc-kr|euckr|ksc5601|ks_c_5601)/i.test(contentType);
+      displayBody = new TextDecoder(isEuckr ? "euc-kr" : "utf-8").decode(bytes);
       decodedFromBase64 = true;
     } catch {
       // keep raw base64

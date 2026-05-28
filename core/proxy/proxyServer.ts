@@ -59,6 +59,8 @@ export class ProxyServer extends EventEmitter {
 
   async stop(): Promise<void> {
     this._running = false;
+    this.server.closeAllConnections?.();
+    this.httpsHandler.closeAllConnections?.();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.emit("status", { running: false });
     console.log("[Proxy] Stopped");

@@ -41,25 +41,52 @@ function TextArea({ value, onChange, placeholder, readOnly }: {
   );
 }
 
-function EuckrConverter() {
+function parseHexBytes(text: string): Uint8Array {
+  const cleaned = text.trim().replace(/\s+/g, "");
+  const bytes: number[] = [];
+  if (cleaned.includes("%")) {
+    const parts = cleaned.split("%").filter(Boolean);
+    for (const p of parts) bytes.push(parseInt(p.slice(0, 2), 16));
+  } else {
+    for (let i = 0; i + 1 < cleaned.length; i += 2) {
+      bytes.push(parseInt(cleaned.slice(i, i + 2), 16));
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+function HexConverter() {
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
-  const [direction, setDirection] = useState<"to" | "from">("to");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<"euckr" | "utf8">("euckr");
 
   const convert = async () => {
     if (!input.trim()) return;
-    setLoading(true);
     setError("");
+    setOutput("");
+
+    if (mode === "utf8") {
+      try {
+        const bytes = parseHexBytes(input);
+        const result = new TextDecoder("utf-8").decode(bytes);
+        setOutput(result);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+      return;
+    }
+
+    setLoading(true);
     try {
       const r = await fetch("/api/utils/euckr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: input, direction }),
+        body: JSON.stringify({ text: input, direction: "from" }),
       });
       const data = await r.json() as { result?: string; error?: string };
-      if (data.error) { setError(data.error); setOutput(""); }
+      if (data.error) setError(data.error);
       else setOutput(data.result ?? "");
     } catch (e) {
       setError((e as Error).message);
@@ -69,33 +96,34 @@ function EuckrConverter() {
   };
 
   return (
-    <Section title="UTF-8 ↔ EUC-KR">
+    <Section title="HEX → Text">
       <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "var(--text-3)" }}>Encoding:</span>
         <button
-          className={`btn sm${direction === "to" ? " active" : ""}`}
-          style={direction === "to" ? { background: "var(--accent-soft)", borderColor: "var(--accent-line)", color: "var(--accent)" } : {}}
-          onClick={() => setDirection("to")}
+          className="btn sm"
+          style={mode === "euckr" ? { background: "var(--accent-soft)", borderColor: "var(--accent-line)", color: "var(--accent)" } : {}}
+          onClick={() => setMode("euckr")}
         >
-          UTF-8 → EUC-KR
+          EUC-KR
         </button>
         <button
-          className={`btn sm${direction === "from" ? " active" : ""}`}
-          style={direction === "from" ? { background: "var(--accent-soft)", borderColor: "var(--accent-line)", color: "var(--accent)" } : {}}
-          onClick={() => setDirection("from")}
+          className="btn sm"
+          style={mode === "utf8" ? { background: "var(--accent-soft)", borderColor: "var(--accent-line)", color: "var(--accent)" } : {}}
+          onClick={() => setMode("utf8")}
         >
-          EUC-KR → UTF-8
+          UTF-8
         </button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 10, alignItems: "center" }}>
         <TextArea
           value={input}
           onChange={setInput}
-          placeholder={direction === "to" ? "Korean UTF-8 text..." : "%B0%A1%B3%AA%B4%D9 (percent-encoded EUC-KR)..."}
+          placeholder="Hex bytes: B0A1B3AA or %B0%A1%B3%AA or B0 A1 B3 AA..."
         />
-        <button className="btn" onClick={convert} disabled={loading} style={{  }}>
-          {loading ? "..." : "Convert"}
+        <button className="btn" onClick={convert} disabled={loading}>
+          {loading ? "..." : "Decode →"}
         </button>
-        <TextArea value={output} readOnly placeholder="Result" />
+        <TextArea value={output} readOnly placeholder={mode === "euckr" ? "Korean text (EUC-KR decoded)" : "Text (UTF-8 decoded)"} />
       </div>
       {error && <div style={{ color: "var(--m-delete)", fontSize: 12, marginTop: 6 }}>{error}</div>}
     </Section>
@@ -190,7 +218,7 @@ export default function Utils() {
       <h1 className="page-title">Text Utils</h1>
       <p className="page-desc">Encoding conversion and string manipulation tools.</p>
       <div style={{ maxWidth: 860 }}>
-        <EuckrConverter />
+        <HexConverter />
         <UrlConverter />
         <SplitConverter />
       </div>

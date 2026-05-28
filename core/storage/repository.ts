@@ -3,11 +3,34 @@ import type { Statement } from "better-sqlite3";
 import type { PacketRecord, PacketFilter, PacketSummary, RawRequest, RawResponse } from "../proxy/types.js";
 import { getBodyType } from "../proxy/decoder.js";
 
+function getCharset(ct: string | undefined): string {
+  if (!ct) return "utf8";
+  const m = ct.match(/charset=["']?([^"';\s]+)/i);
+  if (!m) return "utf8";
+  return m[1].toLowerCase().replace("-", "");
+}
+
+function isEuckr(ct: string | undefined): boolean {
+  const charset = getCharset(ct);
+  return charset === "euckr" || charset === "euc-kr" || charset === "ksc5601" || charset === "ks_c_5601-1987";
+}
+
+function effectiveBodyType(ct: string | undefined, body: Buffer | null): "json" | "text" | "binary" {
+  if (isEuckr(ct)) return "binary";
+  const baseType = getBodyType(ct);
+  if (baseType !== "binary" && body && body.length > 0) {
+    if (body.toString("utf8").includes("\uFFFD")) return "binary";
+  }
+  return baseType;
+}
+
 function bodyToText(body: Buffer | null, ct: string | undefined): string | null {
   if (!body || body.length === 0) return null;
   const type = getBodyType(ct);
-  if (type === "binary") return body.toString("base64");
-  return body.toString("utf8");
+  if (type === "binary" || isEuckr(ct)) return body.toString("base64");
+  const text = body.toString("utf8");
+  if (text.includes("\uFFFD")) return body.toString("base64");
+  return text;
 }
 
 function getContentType(headers: Record<string, string | string[]>): string | null {
@@ -79,12 +102,12 @@ export class PacketRepository {
       isHttps: req.isHttps ? 1 : 0,
       reqHeaders: headersToJson(req.headers),
       reqBody: bodyToText(req.body, reqCt ?? undefined),
-      reqBodyType: getBodyType(reqCt ?? undefined),
+      reqBodyType: effectiveBodyType(reqCt ?? undefined, req.body),
       statusCode: res.statusCode,
       statusMsg: res.statusMessage,
       resHeaders: headersToJson(res.headers as Record<string, string | string[]>),
       resBody: bodyToText(res.body, resCt ?? undefined),
-      resBodyType: getBodyType(resCt ?? undefined),
+      resBodyType: effectiveBodyType(resCt ?? undefined, res.body),
       duration: res.duration,
       tags: "[]",
       notes: "",

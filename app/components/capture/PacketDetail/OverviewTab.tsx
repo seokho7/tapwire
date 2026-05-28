@@ -5,9 +5,15 @@ import { highlightJson, isJson } from "~/utils/json";
 import { fmtTime, fmtDur, fmtSize } from "~/utils/format";
 import { IconCopy } from "~/components/icons/index";
 
-function decodeBody(body: string, bodyType: string | null): string {
+function decodeBody(body: string, bodyType: string | null, contentType?: string | null): string {
   if (bodyType === "binary") {
-    try { return atob(body); } catch { return body; }
+    try {
+      const bin = atob(body);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const isEuckr = !!contentType && /charset=["']?(euc-kr|euckr|ksc5601|ks_c_5601)/i.test(contentType);
+      return new TextDecoder(isEuckr ? "euc-kr" : "utf-8").decode(bytes);
+    } catch { return body; }
   }
   return body;
 }
@@ -45,14 +51,16 @@ export function OverviewTab({ packet }: Props) {
     </button>
   );
 
-  const previewBody = packet.resBody;
+  const previewBody = packet.resBody
+    ? decodeBody(packet.resBody, packet.resBodyType, packet.contentType)
+    : null;
   const showResJson = previewBody && isJson(packet.contentType);
 
   const hasReqBody = packet.reqBody && ["POST", "PUT", "PATCH"].includes(packet.method);
   const reqCt = packet.reqHeaders?.["content-type"]
     ? String(packet.reqHeaders["content-type"]).split(";")[0]
     : null;
-  const reqBodyDecoded = hasReqBody ? decodeBody(packet.reqBody!, packet.reqBodyType) : null;
+  const reqBodyDecoded = hasReqBody ? decodeBody(packet.reqBody!, packet.reqBodyType, reqCt) : null;
   const showReqJson = isJson(reqCt) || packet.reqBodyType === "json" ||
     (reqBodyDecoded !== null && (() => { try { JSON.parse(reqBodyDecoded); return true; } catch { return false; } })());
 

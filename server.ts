@@ -495,8 +495,16 @@ async function main() {
       } else {
         const cleaned = text.trim().replace(/\s+/g, "");
         const bytes: number[] = [];
-        const parts = cleaned.split("%").filter(Boolean);
-        for (const p of parts) bytes.push(parseInt(p.slice(0, 2), 16));
+        if (cleaned.includes("%")) {
+          // percent-encoded: %B0%A1%B3%AA
+          const parts = cleaned.split("%").filter(Boolean);
+          for (const p of parts) bytes.push(parseInt(p.slice(0, 2), 16));
+        } else {
+          // raw hex pairs: B0A1B3AA
+          for (let i = 0; i + 1 < cleaned.length; i += 2) {
+            bytes.push(parseInt(cleaned.slice(i, i + 2), 16));
+          }
+        }
         const result = iconv.decode(Buffer.from(bytes), "euc-kr");
         res.json({ result });
       }
@@ -562,9 +570,19 @@ async function main() {
 
   await proxy.start();
 
+  let shuttingDown = false;
   const shutdown = async () => {
-    await proxy.stop();
-    httpServer.close(() => process.exit(0));
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const timer = setTimeout(() => process.exit(0), 3000);
+    timer.unref();
+    try {
+      httpServer.closeAllConnections?.();
+      httpServer.close();
+      await proxy.stop();
+    } catch { /* ignore */ }
+    clearTimeout(timer);
+    process.exit(0);
   };
 
   process.on("SIGINT", shutdown);

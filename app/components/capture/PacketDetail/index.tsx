@@ -7,12 +7,13 @@ import { OverviewTab } from "./OverviewTab";
 import { HeadersTab } from "./HeadersTab";
 import { BodyTab } from "./BodyTab";
 import { RawTab } from "./RawTab";
+import { HexTab } from "./HexTab";
 import { TimingTab } from "./TimingTab";
 import { InterceptModal } from "~/components/intercept/InterceptModal";
 import { fmtTime, fmtDur, fmtSize } from "~/utils/format";
 import { IconGlobe, IconEdit, IconRefresh, IconCopy, IconTrash, IconX } from "~/components/icons/index";
 
-type Tab = "overview" | "headers" | "body" | "raw" | "timing";
+type Tab = "overview" | "headers" | "hex" | "body" | "raw" | "timing";
 
 export function PacketDetail() {
   const selectedId = useStore((s) => s.selectedId);
@@ -229,7 +230,7 @@ export function PacketDetail() {
       </div>
 
       <div className="tabs">
-        {(["overview", "headers", "body", "raw", "timing"] as Tab[]).map((t) => (
+        {(["overview", "headers", "hex", "body", "raw", "timing"] as Tab[]).map((t) => (
           <button
             key={t}
             className={`tab ${tab === t ? "active" : ""}`}
@@ -245,6 +246,7 @@ export function PacketDetail() {
       <div className="tab-content">
         {tab === "overview" && <OverviewTab packet={packet} />}
         {tab === "headers"  && <HeadersTab packet={packet} />}
+        {tab === "hex"      && <HexTab packet={packet} />}
         {tab === "body"     && <BodyTab packet={packet} />}
         {tab === "raw"      && <RawTab packet={packet} />}
         {tab === "timing"   && <TimingTab packet={packet} />}
