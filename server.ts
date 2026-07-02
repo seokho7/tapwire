@@ -27,6 +27,7 @@ import { replayOne, editAndSend } from "./core/replay/single.js";
 import { getBodyType } from "./core/proxy/decoder.js";
 import type { InterceptContext, RawRequest, RawResponse } from "./core/proxy/types.js";
 
+const execAsync = promisify(exec);
 const gzip = promisify(gzipCb);
 const gunzip = promisify(gunzipCb);
 const brotliCompress = promisify(brotliCompressCb);
@@ -37,7 +38,7 @@ const TW_MAGIC = Buffer.from([0x54, 0x57, 0x02]);
 
 async function compressSession(json: Buffer): Promise<Buffer> {
   const compressed = await brotliCompress(json, {
-    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 },
   });
   return Buffer.concat([TW_MAGIC, compressed]);
 }
@@ -251,17 +252,101 @@ async function main() {
     res.json({ ...stats, topHosts });
   });
 
+  // Session load: open native file picker on server, read from disk
+  api.post("/session/load-file", async (req, res) => {
+    if (!repo) return void res.status(503).json({ error: "Not initialized" });
+
+    let filePath = (req.body as { path?: string })?.path;
+
+    // No path provided → open native OS file picker
+    if (!filePath) {
+      try {
+        const { stdout } = await execAsync(
+          `osascript -e 'POSIX path of (choose file with prompt "Select .tpw file")'`,
+        );
+        filePath = stdout.trim();
+      } catch {
+        return void res.json({ cancelled: true, imported: 0 });
+      }
+    }
+
+    if (!filePath.endsWith(".tpw")) {
+      return void res.status(400).json({ error: "Only .tpw files are allowed" });
+    }
+
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      return void res.status(404).json({ error: "File not found" });
+    }
+
+    try {
+      const raw = fs.readFileSync(resolved);
+      const buf = await decompressSession(raw);
+      const data = JSON.parse(buf.toString("utf8"));
+      const packets = parseSession(data);
+
+      let imported = 0;
+      for (const packet of packets) {
+        try {
+          repo.insertRecord(packet);
+          broadcaster.broadcast({
+            type: "packet:new",
+            data: {
+              id: packet.id,
+              timestamp: packet.timestamp,
+              method: packet.method,
+              url: packet.url,
+              host: packet.host,
+              path: packet.path,
+              statusCode: packet.statusCode,
+              statusMessage: packet.statusMessage,
+              contentType: packet.resHeaders
+                ? getContentType(packet.resHeaders as Record<string, string | string[]>)
+                : packet.contentType,
+              duration: packet.duration,
+              isHttps: packet.isHttps,
+              tags: packet.tags ?? [],
+              intercepted: packet.intercepted,
+              replayed: packet.replayed,
+            },
+          });
+          imported++;
+        } catch { /* skip duplicates */ }
+      }
+      res.json({ imported, file: resolved });
+    } catch {
+      return void res.status(400).json({ error: "Invalid or corrupted .tpw file" });
+    }
+  });
+
   // Session export/import
   api.get("/session", async (req, res) => {
     if (!repo) return void res.status(503).json({ error: "Not initialized" });
-    const limit = parseInt((req.query.limit as string) ?? "100000");
+    const limit = parseInt((req.query.limit as string) ?? "5000");
+    const maxBodyKb = parseInt((req.query.maxBodyKb as string) ?? "256");
+    const maxBodyBytes = maxBodyKb * 1024;
     const packets = repo.findAll({ limit, offset: 0 });
-    const session = toSession(packets);
+
+    // Strip oversized bodies to reduce file size
+    const trimmed = packets.map((p) => {
+      const copy = { ...p };
+      if (copy.reqBody && copy.reqBody.length > maxBodyBytes) {
+        copy.reqBody = null;
+        copy.reqBodyType = null;
+      }
+      if (copy.resBody && copy.resBody.length > maxBodyBytes) {
+        copy.resBody = null;
+        copy.resBodyType = null;
+      }
+      return copy;
+    });
+
+    const session = toSession(trimmed);
     // Strip nulls before compressing — reduces JSON size significantly
     const json = Buffer.from(JSON.stringify(session, (_, v) => (v === null ? undefined : v)));
     const compressed = await compressSession(json);
     res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename="tapwire-${Date.now()}.wspy"`);
+    res.setHeader("Content-Disposition", `attachment; filename="tapwire-${Date.now()}.tpw"`);
     res.send(compressed);
   });
 
@@ -273,14 +358,14 @@ async function main() {
         const buf = await decompressSession(data);
         data = JSON.parse(buf.toString("utf8"));
       } catch {
-        return void res.status(400).json({ error: "Invalid or corrupted .wspy file" });
+        return void res.status(400).json({ error: "Invalid or corrupted .tpw file" });
       }
     }
     let packets;
     try {
       packets = parseSession(data);
     } catch {
-      return void res.status(400).json({ error: "Invalid .wspy file" });
+      return void res.status(400).json({ error: "Invalid .tpw file" });
     }
     let imported = 0;
     for (const packet of packets) {

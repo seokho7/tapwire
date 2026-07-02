@@ -136,39 +136,24 @@ export function PacketList({ style }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `webspy-${Date.now()}.wspy`;
+    a.download = `tapwire-${Date.now()}.tpw`;
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function handleImport() {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".wspy,.json";
-    input.style.display = "none";
-    document.body.appendChild(input);
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (document.body.contains(input)) document.body.removeChild(input);
-      if (!file) return;
-      try {
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        // Detect binary formats: gzip (1f 8b) or TW brotli (54 57 02)
-        const isBinary =
-          (bytes[0] === 0x1f && bytes[1] === 0x8b) ||
-          (bytes[0] === 0x54 && bytes[1] === 0x57 && bytes[2] === 0x02);
-        const res = await fetch("/api/session", {
-          method: "POST",
-          headers: { "Content-Type": isBinary ? "application/octet-stream" : "application/json" },
-          body: isBinary ? buffer : new TextDecoder().decode(bytes),
-        });
-        if (!res.ok) throw new Error(await res.text());
-      } catch (err) {
-        console.error("Import failed:", err);
-      }
-    };
-    input.click();
+  async function handleImport() {
+    try {
+      const res = await fetch("/api/session/load-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (data.cancelled) return;
+      alert(`${data.imported} packets loaded`);
+    } catch (err) {
+      alert(`Load failed: ${(err as Error).message}`);
+    }
   }
 
   async function handleClear() {

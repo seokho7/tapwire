@@ -11,6 +11,7 @@ import Settings from "~/routes/settings";
 import Setup from "~/routes/setup";
 import Cert from "~/routes/cert";
 import Utils from "~/routes/utils";
+import Load from "~/routes/load";
 
 function LiveInterceptOverlay() {
   const intercept = useStore(s => s.intercept);
@@ -35,6 +36,7 @@ export function App() {
             <Route path="/setup" element={<Setup />} />
             <Route path="/cert" element={<Cert />} />
             <Route path="/utils" element={<Utils />} />
+            <Route path="/load" element={<Load />} />
           </Routes>
         </div>
       </div>
