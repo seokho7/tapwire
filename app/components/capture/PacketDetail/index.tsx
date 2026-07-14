@@ -15,6 +15,33 @@ import { IconGlobe, IconEdit, IconRefresh, IconCopy, IconTrash, IconX } from "~/
 
 type Tab = "overview" | "headers" | "hex" | "body" | "raw" | "timing";
 
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Clipboard API is unavailable on non-secure LAN origins; use the legacy fallback.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) throw new Error("Clipboard copy failed");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
 export function PacketDetail() {
   const selectedId = useStore((s) => s.selectedId);
   const removePackets = useStore((s) => s.removePackets);
@@ -93,28 +120,21 @@ export function PacketDetail() {
     try {
       const headers = Object.entries(packet!.reqHeaders ?? {})
         .filter(([k]) => !k.startsWith(":"))
-        .map(([k, v]) => {
-          const val = (Array.isArray(v) ? v[0] : v).replace(/"/g, '\\"');
-          return `-H "${k}: ${val}"`;
-        })
+        .flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map((value) =>
+          `-H ${shellQuote(`${k}: ${value}`)}`,
+        ))
         .join(" \\\n  ");
       const body = packet!.reqBody
-        ? ` \\\n  --data-raw ${JSON.stringify(packet!.reqBody)}`
+        ? packet!.reqBodyType === "binary"
+          ? ` \\\n  --data-binary ${shellQuote(packet!.reqBody)}`
+          : ` \\\n  --data-raw ${shellQuote(packet!.reqBody)}`
         : "";
-      const cmd = `curl -X ${packet!.method} "${packet!.url}" \\\n  ${headers}${body}`;
-      await navigator.clipboard.writeText(cmd);
+      const headerPart = headers ? ` \\\n  ${headers}` : "";
+      const cmd = `curl -X ${packet!.method} ${shellQuote(packet!.url)}${headerPart}${body}`;
+      await copyText(cmd);
       setCurlCopied(true);
       setTimeout(() => setCurlCopied(false), 1500);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = `curl -X ${packet!.method} "${packet!.url}"`;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      setCurlCopied(true);
-      setTimeout(() => setCurlCopied(false), 1500);
-    }
+    } catch { /* keep the button unchanged when the browser blocks every copy method */ }
   }
 
   async function copyAsFetch() {
@@ -129,7 +149,7 @@ export function PacketDetail() {
       };
       if (packet!.reqBody) opts.body = packet!.reqBody;
       const code = `const res = await fetch(${JSON.stringify(packet!.url)}, ${JSON.stringify(opts, null, 2)});\nconst data = await res.json();\nconsole.log(data);`;
-      await navigator.clipboard.writeText(code);
+      await copyText(code);
       setFetchCopied(true);
       setTimeout(() => setFetchCopied(false), 1500);
     } catch { /* ignore */ }
