@@ -104,6 +104,17 @@ function loadPacketColors(): Record<string, string> {
   } catch { return {}; }
 }
 
+export async function refreshPackets(): Promise<void> {
+  const response = await fetch("/api/packets?limit=5000");
+  if (!response.ok) throw new Error("Unable to refresh packets");
+  const { items } = await response.json() as { items: PacketSummary[] };
+  useStore.setState((state) => {
+    const merged = new Map(state.packets.map(packet => [packet.id, packet]));
+    for (const packet of items) merged.set(packet.id, packet);
+    return { packets: [...merged.values()].sort((a, b) => a.timestamp - b.timestamp).slice(-5000) };
+  });
+}
+
 export const useStore = create<AppStore>((set, get) => ({
   packets: [],
   selectedId: null,

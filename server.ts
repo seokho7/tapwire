@@ -3,55 +3,26 @@ import path from "node:path";
 import fs from "node:fs";
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import iconv from "iconv-lite";
-import {
-  gzip as gzipCb, gunzip as gunzipCb,
-  brotliCompress as brotliCompressCb, brotliDecompress as brotliDecompressCb,
-  constants as zlibConstants,
-} from "node:zlib";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import compression from "compression";
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { v4 as uuidv4 } from "uuid";
 
 import { ProxyServer } from "./core/proxy/proxyServer.js";
-import { getDb } from "./core/storage/db.js";
+import { getDb, closeDb } from "./core/storage/db.js";
 import { PacketRepository } from "./core/storage/repository.js";
 import { WsBroadcaster } from "./core/ws/broadcaster.js";
 import { PauseRegistry } from "./core/proxy/interceptor.js";
 import { registry } from "./core/registry.js";
-import { toSession, parseSession } from "./core/storage/session.js";
+import { exportSession, importSession } from "./core/storage/session-transfer.js";
+import { pickSessionFile } from "./core/storage/file-picker.js";
 import { toHar, parseHar } from "./core/storage/har.js";
 import { replayOne, editAndSend } from "./core/replay/single.js";
 import { getBodyType } from "./core/proxy/decoder.js";
 import type { InterceptContext, RawRequest, RawResponse } from "./core/proxy/types.js";
-
-const execAsync = promisify(exec);
-const gzip = promisify(gzipCb);
-const gunzip = promisify(gunzipCb);
-const brotliCompress = promisify(brotliCompressCb);
-const brotliDecompress = promisify(brotliDecompressCb);
-
-// "TW\x02" magic prefix = tapwire brotli format
-const TW_MAGIC = Buffer.from([0x54, 0x57, 0x02]);
-
-async function compressSession(json: Buffer): Promise<Buffer> {
-  const compressed = await brotliCompress(json, {
-    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 },
-  });
-  return Buffer.concat([TW_MAGIC, compressed]);
-}
-
-async function decompressSession(buf: Buffer): Promise<Buffer> {
-  if (buf[0] === 0x54 && buf[1] === 0x57 && buf[2] === 0x02) {
-    return brotliDecompress(buf.slice(3));
-  }
-  if (buf[0] === 0x1f && buf[1] === 0x8b) {
-    return gunzip(buf);
-  }
-  return buf; // raw JSON fallback
-}
 
 interface BreakpointRule {
   id: string;
@@ -185,7 +156,6 @@ async function main() {
 
   app.use(compression());
   app.use(express.json({ limit: "100mb" }));
-  app.use(express.raw({ type: "application/octet-stream", limit: "100mb" }));
 
   // ── API Routes ─────────────────────────────────────────────────────────────
   const api = express.Router();
@@ -252,150 +222,64 @@ async function main() {
     res.json({ ...stats, topHosts });
   });
 
-  // Session load: open native file picker on server, read from disk
+  // The OS picker and file read both happen on the Tapwire PC, without an upload.
+  let filePickerOpen = false;
   api.post("/session/load-file", async (req, res) => {
-    if (!repo) return void res.status(503).json({ error: "Not initialized" });
-
-    let filePath = (req.body as { path?: string })?.path;
-
-    // No path provided → open native OS file picker
-    if (!filePath) {
-      try {
-        const { stdout } = await execAsync(
-          `osascript -e 'POSIX path of (choose file with prompt "Select .tpw file")'`,
-        );
-        filePath = stdout.trim();
-      } catch {
-        return void res.json({ cancelled: true, imported: 0 });
-      }
-    }
-
-    if (!filePath.endsWith(".tpw")) {
-      return void res.status(400).json({ error: "Only .tpw files are allowed" });
-    }
-
-    const resolved = path.resolve(filePath);
-    if (!fs.existsSync(resolved)) {
-      return void res.status(404).json({ error: "File not found" });
-    }
-
     try {
-      const raw = fs.readFileSync(resolved);
-      const buf = await decompressSession(raw);
-      const data = JSON.parse(buf.toString("utf8"));
-      const packets = parseSession(data);
-
-      let imported = 0;
-      for (const packet of packets) {
-        try {
-          repo.insertRecord(packet);
-          broadcaster.broadcast({
-            type: "packet:new",
-            data: {
-              id: packet.id,
-              timestamp: packet.timestamp,
-              method: packet.method,
-              url: packet.url,
-              host: packet.host,
-              path: packet.path,
-              statusCode: packet.statusCode,
-              statusMessage: packet.statusMessage,
-              contentType: packet.resHeaders
-                ? getContentType(packet.resHeaders as Record<string, string | string[]>)
-                : packet.contentType,
-              duration: packet.duration,
-              isHttps: packet.isHttps,
-              tags: packet.tags ?? [],
-              intercepted: packet.intercepted,
-              replayed: packet.replayed,
-            },
-          });
-          imported++;
-        } catch { /* skip duplicates */ }
+      let filePath = (req.body as { path?: unknown })?.path;
+      if (filePath === undefined) {
+        if (filePickerOpen) return void res.status(409).json({ error: "A file selection dialog is already open on the Tapwire PC." });
+        filePickerOpen = true;
+        try { filePath = await pickSessionFile(); }
+        finally { filePickerOpen = false; }
+        if (filePath === null) return void res.json({ cancelled: true, imported: 0, skipped: 0 });
       }
-      res.json({ imported, file: resolved });
-    } catch {
-      return void res.status(400).json({ error: "Invalid or corrupted .tpw file" });
+      if (typeof filePath !== "string" || !/\.(tpw|wspy|json)$/i.test(filePath)) {
+        return void res.status(400).json({ error: "Select a .tpw, .wspy or .json session file." });
+      }
+      const resolved = path.resolve(filePath);
+      if (!(await fs.promises.stat(resolved)).isFile()) {
+        return void res.status(400).json({ error: "Select a session file, not a directory." });
+      }
+      async function* fileContents() {
+        // Open only when the importer is ready to consume errors and bytes.
+        yield* fs.createReadStream(resolved);
+      }
+      const result = await importSession(fileContents(), repo);
+      broadcaster.broadcast({ type: "session:imported", data: result });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Unable to load session" });
     }
   });
 
-  // Session export/import
   api.get("/session", async (req, res) => {
-    if (!repo) return void res.status(503).json({ error: "Not initialized" });
-    const limit = parseInt((req.query.limit as string) ?? "5000");
-    const maxBodyKb = parseInt((req.query.maxBodyKb as string) ?? "256");
-    const maxBodyBytes = maxBodyKb * 1024;
-    const packets = repo.findAll({ limit, offset: 0 });
-
-    // Strip oversized bodies to reduce file size
-    const trimmed = packets.map((p) => {
-      const copy = { ...p };
-      if (copy.reqBody && copy.reqBody.length > maxBodyBytes) {
-        copy.reqBody = null;
-        copy.reqBodyType = null;
-      }
-      if (copy.resBody && copy.resBody.length > maxBodyBytes) {
-        copy.resBody = null;
-        copy.resBodyType = null;
-      }
-      return copy;
-    });
-
-    const session = toSession(trimmed);
-    // Strip nulls before compressing — reduces JSON size significantly
-    const json = Buffer.from(JSON.stringify(session, (_, v) => (v === null ? undefined : v)));
-    const compressed = await compressSession(json);
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename="tapwire-${Date.now()}.tpw"`);
-    res.send(compressed);
+    const limit = req.query.limit === undefined ? -1 : Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || (limit !== -1 && limit < 1)) {
+      return void res.status(400).json({ error: "limit must be a positive integer" });
+    }
+    try {
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="tapwire-${Date.now()}.tpw"`);
+      res.setHeader("Cache-Control", "no-store, no-transform");
+      await pipeline(Readable.from(exportSession(db.name, limit)), res);
+    } catch (error) {
+      if (!res.headersSent && !res.destroyed) res.status(500).json({ error: "Unable to save session" });
+      else if (!res.destroyed) res.destroy(error instanceof Error ? error : undefined);
+    }
   });
 
   api.post("/session", async (req, res) => {
-    if (!repo) return void res.status(503).json({ error: "Not initialized" });
-    let data: unknown = req.body;
-    if (Buffer.isBuffer(data)) {
-      try {
-        const buf = await decompressSession(data);
-        data = JSON.parse(buf.toString("utf8"));
-      } catch {
-        return void res.status(400).json({ error: "Invalid or corrupted .tpw file" });
-      }
-    }
-    let packets;
     try {
-      packets = parseSession(data);
-    } catch {
-      return void res.status(400).json({ error: "Invalid .tpw file" });
+      // Legacy JSON clients are still supported; binary uploads stream directly.
+      const source = req.is("application/json")
+        ? Readable.from([Buffer.from(JSON.stringify(req.body))]) : req;
+      const result = await importSession(source, repo);
+      broadcaster.broadcast({ type: "session:imported", data: result });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Unable to load session" });
     }
-    let imported = 0;
-    for (const packet of packets) {
-      try {
-        repo.insertRecord(packet);
-        broadcaster.broadcast({
-          type: "packet:new",
-          data: {
-            id: packet.id,
-            timestamp: packet.timestamp,
-            method: packet.method,
-            url: packet.url,
-            host: packet.host,
-            path: packet.path,
-            statusCode: packet.statusCode,
-            statusMessage: packet.statusMessage,
-            contentType: packet.resHeaders
-              ? getContentType(packet.resHeaders as Record<string, string | string[]>)
-              : packet.contentType,
-            duration: packet.duration,
-            isHttps: packet.isHttps,
-            tags: packet.tags ?? [],
-            intercepted: packet.intercepted,
-            replayed: packet.replayed,
-          },
-        });
-        imported++;
-      } catch { /* skip duplicates */ }
-    }
-    res.json({ imported });
   });
 
   // HAR export/import
@@ -665,6 +549,7 @@ async function main() {
       httpServer.closeAllConnections?.();
       httpServer.close();
       await proxy.stop();
+      closeDb();
     } catch { /* ignore */ }
     clearTimeout(timer);
     process.exit(0);

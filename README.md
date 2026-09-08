@@ -37,13 +37,17 @@
 | **편집 후 전송** | 이미 캡처된 패킷도 내용을 수정하여 다시 전송하실 수 있습니다. |
 | **재전송(Replay)** | 여러 패킷을 순서대로 재전송하는 시퀀스를 구성할 수 있습니다. |
 | **브레이크포인트** | URL 패턴 + HTTP 메서드 조합으로 규칙을 설정하면 해당 요청을 실시간으로 가로채 수정할 수 있습니다. 규칙은 서버에 저장됩니다. |
-| **세션 내보내기** | 전체 패킷을 `.wspy` (gzip 압축 JSON) 파일로 저장하거나 불러올 수 있습니다. |
+| **세션 내보내기** | 전체 패킷을 `.tpw` (TW3 조각 중복 제거 + 블록 압축)로 무손실 저장합니다. OS 파일 선택 후 로컬 경로를 직접 읽으며, 파일 업로드 없이 기존 `.tpw`/`.wspy`도 불러올 수 있습니다. |
 | **통계** | 실시간 요청 속도, 활성 연결 수, 상위 호스트 현황을 확인하실 수 있습니다. |
 | **모바일 설정** | iOS/Android 기기에서 프록시 및 CA 인증서를 설정하는 가이드를 제공합니다. |
 | **다크/라이트 테마** | `localStorage`에 선택한 테마가 저장됩니다. |
 | **제외 규칙** | Glob 패턴으로 노이즈성 트래픽을 숨길 수 있습니다. (예: `*.png`, `analytics.example.com`) |
 
 ---
+
+## 세션 저장 용량 최적화
+
+기본 `.tpw`는 본문 조각 중복 제거, 바이너리 직접 저장, 메타데이터 사전, Brotli 블록 압축을 적용합니다. 전체 패킷과 큰 본문도 보존하며, 구버전 파일을 계속 읽습니다. SQLite는 다음 실행부터 삭제 후 빈 공간을 자동 회수합니다. 파일 구조, 한도, 호환성, 실측 결과는 [TW3 설계 문서](docs/session-format.md)를 참고하세요.
 
 ## 시스템 요구사항
 
@@ -154,7 +158,9 @@ tapwire/
 │   ├── storage/
 │   │   ├── db.ts          # SQLite 초기화 + 스키마 + PRAGMA 최적화
 │   │   ├── repository.ts  # 패킷 CRUD (findAllSummary / findAll 분리)
-│   │   ├── session.ts     # 세션 내보내기/불러오기
+│   │   ├── session.ts     # 구버전 세션 파싱 + 패킷 검증
+│   │   ├── archive.ts     # TW3 무손실 조각/블록 압축 코덱
+│   │   ├── session-transfer.ts # 스트리밍 저장 + 임시 DB 검증 후 불러오기
 │   │   └── har.ts         # HAR 내보내기
 │   ├── replay/
 │   │   └── single.ts      # 패킷 편집 후 재전송
@@ -270,8 +276,9 @@ CA 인증서 다운로드 및 macOS, Windows, Firefox, iOS, Android 설치 가�
 | `PATCH` | `/api/packets/:id` | 노트 수정 (`{ notes: string }`) |
 | `DELETE` | `/api/packets` | 전체 패킷 삭제 |
 | `GET` | `/api/stats` | 프록시 통계 조회 |
-| `GET` | `/api/session` | 세션을 `.wspy` (gzip 압축 JSON)으로 내보내기 |
-| `POST` | `/api/session` | `.wspy` 세션 불러오기 (gzip 또는 JSON) |
+| `GET` | `/api/session` | 전체 세션을 `.tpw` TW3 무손실 스트림으로 내보내기 (`?limit=` 선택) |
+| `POST` | `/api/session/load-file` | OS 파일 선택 후 로컬 경로 직접 읽기 (본문 없음, 또는 `{ path }`) |
+| `POST` | `/api/session` | TW3/TW2/gzip/JSON 세션 검증 후 원자적으로 불러오기 |
 | `GET` | `/api/har` | 전체 패킷을 HAR 형식으로 내보내기 |
 | `POST` | `/api/replay/:id` | 패킷 원본 재전송 |
 | `PUT` | `/api/intercept/:id` | 인터셉트된 요청 전달 (수정 내용 포함 가능) |

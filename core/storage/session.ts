@@ -20,7 +20,7 @@ export function parseSession(data: unknown): PacketRecord[] {
     if (typeof pk.id !== "string" || !pk.id) throw new Error(`packet[${i}].id missing`);
     if (typeof pk.url !== "string") throw new Error(`packet[${i}].url missing`);
     // Restore null defaults for fields stripped during compression
-    return {
+    const record = {
       ...pk,
       statusCode:   pk.statusCode   ?? null,
       statusMessage: pk.statusMessage ?? null,
@@ -38,5 +38,37 @@ export function parseSession(data: unknown): PacketRecord[] {
       intercepted:  Boolean(pk.intercepted),
       replayed:     Boolean(pk.replayed),
     } as unknown as PacketRecord;
+    validatePacket(record, i);
+    return record;
   });
+}
+
+export function validatePacket(value: unknown, index = 0): asserts value is PacketRecord {
+  const fail = () => { throw new Error(`packet[${index}] invalid`); };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
+  const p = value as Record<string, unknown>;
+  for (const key of ["id", "clientIp", "method", "url", "host", "path", "httpVersion", "notes"]) {
+    if (typeof p[key] !== "string") fail();
+  }
+  if (!p.id || !Number.isSafeInteger(p.timestamp)) fail();
+  for (const key of ["statusCode", "duration"]) {
+    if (p[key] !== null && (typeof p[key] !== "number" || !Number.isFinite(p[key]))) fail();
+  }
+  for (const key of ["statusMessage", "contentType", "reqBody", "resBody"]) {
+    if (p[key] !== null && typeof p[key] !== "string") fail();
+  }
+  for (const key of ["reqBodyType", "resBodyType"]) {
+    if (![null, "text", "json", "binary"].includes(p[key] as string | null)) fail();
+  }
+  for (const key of ["isHttps", "intercepted", "replayed"]) {
+    if (typeof p[key] !== "boolean") fail();
+  }
+  if (!Array.isArray(p.tags) || !p.tags.every(t => typeof t === "string")) fail();
+  for (const key of ["reqHeaders", "resHeaders"]) {
+    const h = p[key];
+    if (h === null && key === "resHeaders") continue;
+    if (!h || typeof h !== "object" || Array.isArray(h)) return fail();
+    if (!Object.values(h).every(v => typeof v === "string" ||
+      (Array.isArray(v) && v.every(s => typeof s === "string")))) fail();
+  }
 }

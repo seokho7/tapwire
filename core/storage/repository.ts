@@ -181,6 +181,24 @@ export class PacketRepository {
     return rows.map(r => this.toRecord(r));
   }
 
+  *iterateAll(limit = -1): Generator<PacketRecord> {
+    for (const row of this.db.prepare("SELECT * FROM packets ORDER BY timestamp DESC, id LIMIT ?").iterate(limit)) {
+      yield this.toRecord(row as Record<string, unknown>);
+    }
+  }
+
+  importRecords(records: Iterable<PacketRecord>): { imported: number; skipped: number } {
+    return this.db.transaction(() => {
+      let imported = 0;
+      let skipped = 0;
+      for (const record of records) {
+        if (this.insertRecord(record)) imported++;
+        else skipped++;
+      }
+      return { imported, skipped };
+    })();
+  }
+
   count(filter: PacketFilter = {}): number {
     const { clause, params } = this.buildWhere(filter);
     const sql = `SELECT COUNT(*) as n FROM packets${clause}`;
@@ -200,8 +218,8 @@ export class PacketRepository {
     this.stmtMarkIntercepted.run(id);
   }
 
-  insertRecord(r: PacketRecord): void {
-    this.stmtInsertOrIgnore.run({
+  insertRecord(r: PacketRecord): boolean {
+    const result = this.stmtInsertOrIgnore.run({
       id: r.id,
       timestamp: r.timestamp,
       clientIp: r.clientIp,
@@ -226,6 +244,7 @@ export class PacketRepository {
       replayed: r.replayed ? 1 : 0,
       contentType: r.contentType,
     });
+    return result.changes > 0;
   }
 
   delete(id: string): void {

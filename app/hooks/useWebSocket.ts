@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useStore } from "../store/index";
+import { useStore, refreshPackets } from "../store/index";
 import type { PacketRecord } from "~/types";
 
 export function useWebSocket() {
@@ -21,6 +21,7 @@ export function useWebSocket() {
       ws.onopen = () => {
         setWsConnected(true);
         retryDelay.current = 1000;
+        void refreshPackets().catch(console.error);
       };
 
       ws.onclose = () => {
@@ -40,6 +41,9 @@ export function useWebSocket() {
         try {
           const msg = JSON.parse(event.data as string);
           switch (msg.type) {
+            case "session:imported":
+              void refreshPackets().catch(console.error);
+              break;
             case "packet:new":
               addPacket(msg.data);
               break;

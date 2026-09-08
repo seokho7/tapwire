@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "npx tsx watch --ignore 'certs/**' --ignore 'data/**' --ignore 'build/**' --ignore '*.mjs' server.ts",
     "start": "vite build && NODE_ENV=production npx tsx server.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "benchmark:session": "tsx scripts/benchmark-session.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

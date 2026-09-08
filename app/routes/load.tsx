@@ -15,7 +15,11 @@ export default function Load() {
       return;
     }
 
-    fetch(`/api/session/load-file?path=${encodeURIComponent(filePath)}`)
+    fetch("/api/session/load-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: filePath }),
+    })
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: "Unknown error" }));

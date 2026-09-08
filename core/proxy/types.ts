@@ -102,6 +102,7 @@ export interface InterceptPausedPacket {
 }
 
 export type WsEvent =
+  | { type: "session:imported"; data: { imported: number; skipped: number } }
   | { type: "packet:new"; data: PacketSummary }
   | { type: "packet:updated"; data: PacketSummary }
   | { type: "intercept:paused"; data: { id: string; packet: InterceptPausedPacket } }

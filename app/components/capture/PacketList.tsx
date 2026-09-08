@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect, useCallback, useState } from "react";
-import { useStore, getFilteredPackets, type PacketSummary } from "~/store/index";
+import { useStore, refreshPackets, getFilteredPackets, type PacketSummary } from "~/store/index";
 import { FilterChips } from "./FilterChips";
 import { PacketRow } from "./PacketRow";
 import { ContextMenu } from "./ContextMenu";
@@ -21,6 +21,8 @@ export function PacketList({ style }: Props) {
   const selectedId = useStore((s) => s.selectedId);
   const setFilter = useStore((s) => s.setFilter);
 
+  const [importing, setImporting] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState("");
   const [search, setSearch] = useState("");
   const [deepMode, setDeepMode] = useState(false);
   const [deepResults, setDeepResults] = useState<PacketSummary[] | null>(null);
@@ -129,30 +131,34 @@ export function PacketList({ style }: Props) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  async function handleExport() {
-    const res = await fetch("/api/session");
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+  function handleExport() {
+    // Let the browser stream directly to disk without retaining a complete Blob.
     const a = document.createElement("a");
-    a.href = url;
+    a.href = "/api/session";
     a.download = `tapwire-${Date.now()}.tpw`;
-    a.style.display = "none";
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    a.remove();
+    setSessionMessage("Saving all packets. Check browser downloads for progress.");
   }
 
   async function handleImport() {
+    setImporting(true);
+    setSessionMessage("Select a session file in the dialog on the Tapwire PC…");
     try {
-      const res = await fetch("/api/session/load-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const res = await fetch("/api/session/load-file", {
+        method: "POST",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      if (data.cancelled) return;
-      alert(`${data.imported} packets loaded`);
+      if (data.cancelled) { setSessionMessage("Load cancelled."); return; }
+      setSessionMessage(`${data.imported} packets loaded · ${data.skipped} duplicates skipped`);
+      try { await refreshPackets(); }
+      catch { setSessionMessage(`${data.imported} packets loaded. Refresh the page to view them.`); }
     } catch (err) {
-      alert(`Load failed: ${(err as Error).message}`);
+      setSessionMessage(`Load failed: ${(err as Error).message}`);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -171,6 +177,7 @@ export function PacketList({ style }: Props) {
 
   return (
     <div className="packet-list-panel" style={style}>
+      {sessionMessage && <div role="status" style={{ padding: "8px 12px", fontSize: 12, color: "var(--text-2)", overflowWrap: "anywhere" }}>{sessionMessage}</div>}
       <div className="list-header">
         <div className="list-header-row1">
           <span className="list-title">Packets</span>
@@ -179,8 +186,8 @@ export function PacketList({ style }: Props) {
             <button className="btn ghost sm" onClick={handleExport} style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <IconDownload size={12} /> Save
             </button>
-            <button className="btn ghost sm" onClick={handleImport} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <IconUpload size={12} /> Load
+            <button className="btn ghost sm" onClick={handleImport} disabled={importing} title="Open a local session on the Tapwire PC" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <IconUpload size={12} /> {importing ? "Loading…" : "Load"}
             </button>
             <button className="icon-btn" onClick={handleClear} title="Clear all">
               <IconTrash size={15} />
